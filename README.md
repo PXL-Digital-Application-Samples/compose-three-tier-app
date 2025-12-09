@@ -1,6 +1,8 @@
 # Exercise: Containerize a Three-Tier Application
 
-You have been provided with the source code for a classic Three-Tier application (Client, Server, Database). Your task is to containerize this application by creating a `Dockerfile` for each layer and orchestrating them together using a `compose.yaml` file.
+<https://github.com/PXL-Digital-Application-Samples/compose-three-tier-app>
+
+You have been provided with the source code for a classic Three-Tier application. Your task is to containerize this application by creating a `Dockerfile` for each layer and orchestrating them together using a `compose.yaml` file.
 
 **The Application Architecture:**
 
@@ -18,11 +20,11 @@ Create a `Dockerfile` inside the `mysql` directory.
 
 **Requirements:**
 
-- **Base Image:** Use version 8.0 of the official MySQL image.
-- **Authentication:** You must configure the environment variables to set the root password to `mysql123`.
-- **Initialization:** Configure the container to automatically create a database named `school` upon startup.
-- **Networking:** The database listens on the standard MySQL port.
-- **Persistence:** Ensure the database files are stored in a volume so data is not lost if the container restarts.
+- **Base Image:** Use version **8.0** of the official MySQL image.
+- **Authentication:** Configure the environment variables to set the root password to `mysql123` and create a database named `school`.
+- **Legacy Compatibility:** Since our Backend uses an older Node.js version, you must configure the MySQL server to use the native password authentication plugin.
+  - *Hint:* Override the default command with: `mysqld --default-authentication-plugin=mysql_native_password`
+- **Persistence:** Ensure the database data is stored in a volume at `/var/lib/mysql`.
 
 ### Task B: The Backend (Node.js)
 
@@ -32,75 +34,92 @@ Create a `Dockerfile` inside the `backend` directory.
 
 - **Base Image:** Use Node.js version **14**.
 - **Work Directory:** Set the working directory inside the container to `/app`.
-- **Dependencies:** Copy the package files and install the dependencies using `npm install`.
+- **Dependencies:** Copy package files and install dependencies (`npm install`).
 - **Source:** Copy the remaining application code.
-- **Networking:** The application runs on port **3500**. Make sure this port is exposed.
-- **Execution:** The app should start by running `server.js`.
+- **Networking:** Expose port **3500**.
+- **Execution:** Start the app with `node server.js`.
+
+**Note:** This application expects specific environment variables to connect to the database. You will configure the *values* for these in Task D (Docker Compose), but the keys expected by the code are:
+
+- `host`
+- `user`
+- `password`
+- `database`
 
 ### Task C: The Frontend (Multi-Stage Build)
 
-Create a `Dockerfile` inside the `frontend` directory. This **must** be a multi-stage build to optimize image size.
+Create a `Dockerfile` inside the `frontend` directory. This **must** be a multi-stage build.
 
 **Requirements:**
 
 - **Stage 1 (Build Stage):**
   - Use Node.js version **21 (Alpine variant)**.
   - Copy source files and install dependencies.
+  - **API Configuration:** The React code expects an environment variable named `REACT_APP_API_BASE_URL`.
+    - You must set this variable to `http://localhost:3500` **before** running the build command.
+    - *Why Localhost?* Because the React code runs in the User's Browser, not inside the Docker container.
   - Run the build script (`npm run build`) to generate the static files.
 - **Stage 2 (Production Stage):**
-  - Use **Nginx (Alpine variant)** as the base.
-  - Copy the *build artifacts* (the static files generated in Stage 1) into the Nginx html directory (`/usr/share/nginx/html`).
-  - ***Networking:** Expose port **80**.
-  - **Execution:** Start Nginx in the foreground.
+  - Use **Nginx (Alpine variant)**.
+  - Copy the *build artifacts* from Stage 1 into the Nginx html directory (`/usr/share/nginx/html`).
+  - Expose port **80** and start Nginx.
 
 ### Task D: Orchestration (Docker Compose)
 
-Create a `compose.yaml` file in the root directory to run all three services together.
+Create a `compose.yaml` file in the root directory.
 
 **Requirements:**
 
-- **Services:** Define three services: `frontend`, `backend`, and `mysql-db`.
-- **Build Contexts:** Each service should build from its respective directory.
+- **Services:** Define `frontend`, `backend`, and `mysql-db`.
 - **Port Mapping:**
-  - Frontend: Map host port **80** to container port **80**.
-  - Backend: Map host port **3500** to container port **3500**.
-  - Database: Map host port **3306** to container port **3306**.
-- **Networking:** All services must be on the same custom bridge network (e.g., `three-tier-network`) to allow them to communicate by service name.
-- **Volumes:** Define a named volume (e.g., `mysql-data`) and mount it to `/var/lib/mysql` in the database service to ensure data persistence.
-- **Dependency Management:** Ensure the `backend` service does not attempt to start until the `mysql-db` service is running (Hint: use `depends_on`).
+  - Frontend: Host **80** -\> Container **80**.
+  - Backend: Host **3500** -\> Container **3500**.
+  - Database: Host **3306** -\> Container **3306**.
+- **Networking:** Put all services on a custom bridge network named `three-tier-network`.
+- **Environment Configuration (Backend):**
+  - Configure the backend service with the environment variables listed in Task B.
+  - **Important:** The `host` variable must match the **container name** or **service name** of your database container.
+- **Volumes:** Mount a named volume to the database service for persistence.
+- **Dependencies:** Use `depends_on` to ensure the backend starts after the database.
 
 ---
 
 ## Verification Steps
 
-Once you have created the files, run the application using:
+1. **Build and Run:**
 
-```bash
-docker compose up --build -d
-```
+    ```bash
+    docker compose up --build -d
+    ```
 
-To pass the exercise, you can successfully execute the following steps:
+2. **Initialize Database:**
+    Open a shell inside the database container and create the required table:
 
-- **Database Setup:** Access the running database container and verify the `school` database exists.
+    ```bash
+    docker compose exec mysql-db mysql -u root -p
+    # Password: mysql123
+    ```
 
-  ```bash
-  docker compose exec mysql-db mysql -u root -p
-  # Enter password: mysql123
-  SHOW DATABASES;
-  ```
+    *(Paste the following SQL)*:
 
-- **Table Creation:** Inside the MySQL shell, manually run the following SQL to ensure the DB is writable:
+    ```sql
+    USE school;
+    CREATE TABLE student (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(40), roll_number INT, class VARCHAR(16));
+    CREATE TABLE teacher (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(40), subject VARCHAR(40), class VARCHAR(16));
+    exit;
+    ```
 
-  ```sql
-  USE school;
-  CREATE TABLE student (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(40), roll_number INT, class VARCHAR(16));
-  ```
+3. **Final Test:**
+    Open `http://localhost` in your browser.
 
-- **Browser Test:** Navigate to `http://localhost` in your browser. You should see the React application running.
+      - Click "Teachers".
+      - Add a new teacher.
+      - If the data saves and appears in the list, your Full Stack application is working\!
 
 ---
 
-## Helpful Hints
+## Common Pitfalls & Hints
 
-> - **Frontend:** In the multi-stage build, remember that the build artifacts usually land in a folder named `/app/build` or `/app/dist` in the first stage.
-> - **Backend Connection:** If the backend fails to connect to the database, check that your `compose.yaml` service names match what the backend expects (or ensure they are on the same network).
+> 1. **Frontend Variables:** React Environment variables (starting with `REACT_APP_`) are "baked in" at build time. If you change the variable in the Dockerfile, you must run `docker compose build --no-cache frontend` to see the change.
+> 2. **Backend Connection:** If the backend crashes with `ECONNREFUSED 127.0.0.1:3306`, it means the backend is trying to connect to *itself* (localhost). Ensure the `host` environment variable is set to the **Database Service Name** defined in your compose file.
+> 3. **Database Version:** We use MySQL 8.0 with the `--default-authentication-plugin=mysql_native_password` flag because the Node.js 14 MySQL driver is too old to understand the newer default MySQL authentication.
